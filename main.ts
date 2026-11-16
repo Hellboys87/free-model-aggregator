@@ -131,8 +131,6 @@ interface TrialState {
   apiKey: string;
   /** Manifest rows are consumed in the order completion requests land. */
   nextPrompt: number;
-  /** Models that refused earlier in this trial; tried last, not first. */
-  refusedModels: Set<string>;
   totalAttempts: number;
 }
 
@@ -171,11 +169,11 @@ async function handleCompletion(state: TrialState, api: WireApi, req: IncomingMe
     api === "openai" ? openAIRequestForGateway(body) : anthropicRequestToOpenAI(body);
   const wantStream = body.stream === true;
 
-  const ranked = rankCandidates(state.brief.models, requires);
-  const ordered: FreeModel[] = [
-    ...ranked.filter((model) => !state.refusedModels.has(model.id)),
-    ...ranked.filter((model) => state.refusedModels.has(model.id)),
-  ];
+  // Best first, every prompt: a refusal earlier in the trial does not
+  // demote a model for later prompts — a transient 429 would otherwise
+  // cost quality on every prompt after it, while a model that is truly
+  // down is simply failed over again, one fast refusal per prompt.
+  const ordered = rankCandidates(state.brief.models, requires);
 
   const failures: UpstreamFailure[] = [];
   const startedAt = Date.now();
@@ -202,7 +200,6 @@ async function handleCompletion(state: TrialState, api: WireApi, req: IncomingMe
       return;
     }
     failures.push({ status: result.status, code: result.code, model: candidate.id });
-    state.refusedModels.add(candidate.id);
     log(`model ${candidate.id} refused (${result.status} ${result.code}): ${result.message}`);
   }
 
@@ -283,7 +280,6 @@ async function main(): Promise<void> {
     gatewayUrl: chatCompletionsUrl(requiredEnv("OPENAI_BASE_URL")),
     apiKey: process.env.OPENAI_API_KEY ?? "",
     nextPrompt: 0,
-    refusedModels: new Set<string>(),
     totalAttempts: 0,
   };
 

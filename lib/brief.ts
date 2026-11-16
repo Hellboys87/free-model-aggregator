@@ -107,7 +107,9 @@ function dialableId(row: JsonRecord): string | null {
 function toFreeModel(row: JsonRecord): FreeModel | null {
   const id = dialableId(row);
   if (id === null) return null;
-  const capabilities = isRecord(row.capabilities) ? row.capabilities : {};
+  // Capabilities ride on the row itself (tools/vision/json), or nested
+  // under a capabilities object in some brief printings.
+  const capabilities = isRecord(row.capabilities) ? row.capabilities : row;
   return {
     id,
     ratingMilli: typeof row.rating_milli === "number" ? row.rating_milli : 0,
